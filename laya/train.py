@@ -2,7 +2,8 @@
 """
 laya-biome train — RTX2060 12GB (64GB RAM) single-GPU, offline
 - No Kaggle, no torchrun DDP, no internet at train time (uses local laya-model-min if present)
-- Single model, mixed tasks: macro_params + micro_flora in same train.jsonl
+- Single model, mixed tasks: macro_params + micro_flora + palette (discrete 0..4, per-biome ≤12, per-tile seeded) in same train.jsonl
+- State is 9-field (lat, alt, distance_to_ocean Chamfer, landmass_size per-continent, ocean_current, windward, rainfall, lod, lod_blend) — all precomputed in C# HeightmapGen
 
 Usage on RTX2060 box:
   git pull  # from laya-biome

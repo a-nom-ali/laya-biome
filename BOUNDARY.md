@@ -8,10 +8,11 @@ This document defines where autonomous (AI) work **stops** and **wetware (you)**
 
 **Scaffolded (`laya-biome/`):**
 - `csharp/HeightmapGen.cs` — Chamfer 8-neighbour distance (1 / 1.414) + per-continent flood-fill labeling + directional wind-sweep per latitude band (all `O(N)` on `float[]`, 1D for cache, `RTX2060 12GB` ready for `2048²`).
-- `csharp/BiomeParams.cs` — `BiomeParams` struct (7 floats) + `SeededChoice` (hash `planet_seed,x,y,lod` → deterministic `Categorical` via `System.Random`).
-- `scripts/label_with_nimble.py` — `raw_states.json` → `Nimble` (`Ollama 0.35+ qwen3.5-9B`, `8k ctx`) → `laya_terrain.jsonl` (keeps `choice ≤12`, `head 256/12=21` tokens/option, balances `3-5k`).
+- `csharp/BiomeParams.cs` — `BiomeParams` struct (7 → 9 fields with `lod` `int` `0..4` + `lodBlend` `float`) + `SeededChoice` (hash `planet_seed,x,y,lod` → deterministic `Categorical` via `System.Random`, **per tile** `hash(planet_seed,x,y,lod)` → `1280` `byte`/`chunk` `1.3KB` in `64GB RAM`).
+- `csharp/Palettes.cs` — **Discrete per-biome per-tile LOD palettes** (`For(terrain, lod)` `≤12` per `(terrain,lod)`; `Dunes@0 → Sand Seas` vs `Dunes@4 → Dune Sand/Wind Ripples/...` `4`, `Mountains@0 → Alpine Gray` vs `@4 → Granite/Scree/...` `4` — keeps `head 256/12=21` tokens/option, not `60` global).
+- `scripts/label_with_nimble.py` — `raw_states.json` → `Nimble` (`Ollama 0.35+ qwen3.5-9B`, `8k ctx`) → `laya_terrain.jsonl` (now `3` tasks per raw: `macro_params` + `micro_flora` + `palette` `choice ≤12` + `palette_blend` `score 0..3`; keeps `choice ≤12`, balances `3-5k` → `~15k` rows with `5` `LOD`s).
 - `scripts/validate_with_jev.py` — samples `200` from `laya_terrain.jsonl`, runs `Nimble` vs `Jev` (`TYPESAFE_API_KEY`, `$1` → `~200k` tokens `$0.008`), reports `choice agreement >0.85` and `score MAE <0.6`.
-- `laya/train.py` — `RTX2060 12GB` single-GPU, offline-friendly (`/tmp/laya_model_min` or `~/.cache/.../laya` if present), `batch 8×1024` `~3.5GB VRAM`, `head 256`, no `torchrun` DDP, no internet at train time.
+- `laya/train.py` — `RTX2060 12GB` single-GPU, offline-friendly (`/tmp/laya_model_min` or `~/.cache/.../laya` if present), `batch 8×1024` `~3.5GB VRAM`, `head 256`, no `torchrun` DDP, no internet at train time — now trains `LOD`-conditioned `palette` (`state` gains `lod` `int` + `lod_blend` `float`).
 - `data/` — empty, ready for `raw_states.json`/`laya_terrain.jsonl`/`train.jsonl` (gitignored, like `epistemic_firewall/data/laya_finetune`).
 
 **Validated on this Mac (MPS):**
@@ -25,9 +26,9 @@ This document defines where autonomous (AI) work **stops** and **wetware (you)**
 
 | # | Action Required (you) | Command / Location | Expected Artifact |
 |---|------------------------|--------------------|-------------------|
-| 1 | **Generate `raw_states.json` in `C#`** (heightmap → `distanceToOcean` Chamfer + `landmassSize` per-continent + `rainfall` wind-sweep) | Open `laya-biome.sln` on `RTX2060` box, run `HeightmapGen` on `5k` `16×16` chunks (oversample `rainfall 0.45-0.55` + `windward 0.1/dist 0.8` interior) → `data/raw_states.json` | `data/raw_states.json` (`5k` `7-field` states) |
+| 1 | **Generate `raw_states.json` in `C#`** (heightmap → `distanceToOcean` Chamfer + `landmassSize` per-continent + `rainfall` wind-sweep + `LOD` `0..4` discrete) | Open `laya-biome.sln` on `RTX2060` box, run `HeightmapGen` on `5k` `16×16` chunks × `5` `LOD`s (`25k` states, `9` fields with `lod`/`lod_blend`; oversample `rainfall 0.45-0.55` + `windward 0.1/dist 0.8` interior) → `data/raw_states.json` | `data/raw_states.json` (`25k` `9-field` states) |
 | 2 | **Start `Nimble` locally** | `ollama run nimble` or `ollama run qwen3.5` on `RTX2060` (`Ollama 0.35+`, `9B` needs `~8GB` VRAM — fits `12GB` + `48GB` shared) | `http://localhost:11434` `nimble` ready |
-| 3 | **Label** | `python scripts/label_with_nimble.py --input data/raw_states.json --output data/laya_terrain.jsonl --nimble http://localhost:11434` | `data/laya_terrain.jsonl` (`~10k` entries, 2 tasks per raw) |
+| 3 | **Label** | `python scripts/label_with_nimble.py --input data/raw_states.json --output data/laya_terrain.jsonl --nimble http://localhost:11434` | `data/laya_terrain.jsonl` (`~15k` entries, `3` tasks per raw: `macro` + `micro` + `palette` `≤12` + `blend` `0..3`, per-tile `hash(planet_seed,x,y,lod)`) |
 | 4 | **Golden validation (`$1` Jev)** | `TYPESAFE_API_KEY=... python scripts/validate_with_jev.py --input data/laya_terrain.jsonl --sample 200` | `choice >0.85`, `MAE <0.6` or retune prompt |
 | 5 | **Fine-tune on `RTX2060`** | `git pull` on `RTX2060` → `python laya/train.py --epochs 4 --batch 8` (`~6 min` on `2060`, vs `41231s` on `Mac` CPU) | `laya/laya_biome_finetuned/model.safetensors` (`804M`) |
 | 6 | **Test in engine** | `LayaGateway(model="laya/laya_biome_finetuned")` → `SampleTile(state, hash(planet_seed,x,y,lod))` in `C#` → blend textures via `moisture` `confidence` | In-game `Mangroves` only when `coastal_proximity >0.7` etc. |
