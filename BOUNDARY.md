@@ -65,7 +65,7 @@ This document defines where autonomous (AI) work **stops** and **wetware (you)**
 git pull  # from laya-biome
 
 # 2. C# → raw_states
-dotnet run --project csharp/HeightmapGen.cs  # or open in Rider/VS, ensure it writes data/raw_states.json
+dotnet run --project csharp/laya-biome.csproj  # writes data/raw_states.json (25k states, Chamfer + per-continent)
 
 # 3. Nimble
 ollama pull nimble  # or qwen3.5

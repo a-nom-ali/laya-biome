@@ -12,6 +12,8 @@ public struct BiomeParams
     public float oceanCurrent;      // -1 cold polar -> +1 warm equatorial
     public float windward;          // 0 leeward (shadow) .. 1 windward
     public float rainfall;          // 0..1 from CalculateRainShadows
+    public int lod;                 // 0..4 discrete (0=planet, 4=ground)
+    public float lodBlend;          // 0..1 within-LOD morph
 }
 
 public static class BiomeStateBuilder
@@ -27,6 +29,8 @@ public static class BiomeStateBuilder
             { "ocean_current", p.oceanCurrent },
             { "windward", p.windward },
             { "rainfall", p.rainfall },
+            { "lod", p.lod },
+            { "lod_blend", p.lodBlend },
             { "seed", seed } // for sampled-deterministic cache key
         };
     }
